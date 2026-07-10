@@ -1,0 +1,55 @@
+﻿# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+!*.env.example
+
+# Logs
+*.log
+logs/
+
+# Go build / test artifacts
+*.exe
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Local runtime caches / temp files
+tmp/
+temp/
+.cache/
+.air/
+
+# Node / Vite
+**/node_modules/
+**/.vite/
+
+# Frontend build output
+desktop/frontend/dist/
+
+# Wails build output
+desktop/build/bin/
+desktop/build/windows/
+desktop/frontend/package.json.md5
+
+# Local databases / uploaded runtime data
+*.db
+*.sqlite
+*.sqlite3
+data/
+uploads/
+
+# Docker/local override files
+docker-compose.override.yml

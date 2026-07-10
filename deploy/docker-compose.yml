@@ -1,0 +1,45 @@
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: lightchat-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_DATABASE: lightchat
+    ports:
+      - "3307:3306"
+    volumes:
+      - lightchat_mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:7
+    container_name: lightchat-redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  kafka:
+    image: apache/kafka:latest
+    container_name: lightchat-kafka
+    restart: always
+    ports:
+      - "9092:9092"
+
+  minio:
+    image: minio/minio
+    container_name: lightchat-minio
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: 12345678
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - lightchat_minio_data:/data
+
+volumes:
+  lightchat_mysql_data:
+  lightchat_minio_data:
