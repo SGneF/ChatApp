@@ -1,21 +1,22 @@
 ﻿<script lang="ts" setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { Image, MoreHorizontal, Paperclip, Phone, Search, Send, Smile } from 'lucide-vue-next'
 import type { ConversationItemData } from '../../api/conversation'
-
-interface LocalMessage {
-  id: string
-  sender: 'me' | 'other'
-  content: string
-  time: string
-}
+import type { MessageResponse } from '../../api/message'
+import { useMessageStore } from '../../stores/message'
 
 const props = defineProps<{
   conversation: ConversationItemData | null
 }>()
 
+const messageStore = useMessageStore()
+const { loadingHistory, messagesByConversation, socketError, socketStatus } = storeToRefs(messageStore)
+
 const inputText = ref('')
-const localMessages = reactive<Record<number, LocalMessage[]>>({})
+const sending = ref(false)
+const localError = ref('')
+const listRef = ref<HTMLElement | null>(null)
 
 const targetName = computed(() => {
   const user = props.conversation?.target_user
@@ -25,47 +26,92 @@ const targetName = computed(() => {
 
 const currentMessages = computed(() => {
   if (!props.conversation) return []
-  return localMessages[props.conversation.id] || []
+  return messagesByConversation.value[props.conversation.id] || []
 })
 
-const canSend = computed(() => Boolean(props.conversation) && inputText.value.trim() !== '')
+const canSend = computed(() => {
+  return Boolean(props.conversation) && inputText.value.trim() !== '' && !sending.value && messageStore.isSocketConnected
+})
 
-function formatTime(date: Date) {
+const socketLabel = computed(() => {
+  switch (socketStatus.value) {
+    case 'connected':
+      return '在线'
+    case 'connecting':
+      return '连接中'
+    case 'error':
+      return '连接异常'
+    case 'closed':
+      return '离线'
+    default:
+      return '未连接'
+  }
+})
+
+function isMine(message: MessageResponse) {
+  return message.sender_id === messageStore.currentUserId
+}
+
+function formatTime(value: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-function sendMessage() {
+function displayContent(message: MessageResponse) {
+  if (message.status === 'revoked') return '撤回了一条消息'
+  if (message.type === 'image') return '[图片]'
+  if (message.type === 'file') return '[文件]'
+  if (message.type === 'voice') return '[语音]'
+  return message.content
+}
+
+async function sendMessage() {
   if (!props.conversation || !canSend.value) return
 
-  if (!localMessages[props.conversation.id]) {
-    localMessages[props.conversation.id] = []
+  sending.value = true
+  localError.value = ''
+  try {
+    messageStore.sendText(props.conversation.id, inputText.value.trim())
+    inputText.value = ''
+  } catch (err) {
+    localError.value = err instanceof Error ? err.message : '消息发送失败'
+  } finally {
+    sending.value = false
   }
-
-  localMessages[props.conversation.id].push({
-    id: `${props.conversation.id}-${Date.now()}`,
-    sender: 'me',
-    content: inputText.value.trim(),
-    time: formatTime(new Date()),
-  })
-  inputText.value = ''
 }
 
 function handleKeydown(event: KeyboardEvent) {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
     event.preventDefault()
-    sendMessage()
+    void sendMessage()
+  }
+}
+
+async function scrollToBottom() {
+  await nextTick()
+  if (listRef.value) {
+    listRef.value.scrollTop = listRef.value.scrollHeight
   }
 }
 
 watch(
   () => props.conversation?.id,
-  (id) => {
+  async (id) => {
     inputText.value = ''
-    if (id && !localMessages[id]) {
-      localMessages[id] = []
+    localError.value = ''
+    if (id) {
+      await messageStore.loadHistory(id).catch((err) => {
+        localError.value = err instanceof Error ? err.message : '加载历史消息失败'
+      })
+      await scrollToBottom()
     }
   },
+  { immediate: true },
 )
+
+watch(() => currentMessages.value.length, scrollToBottom)
 </script>
 
 <template>
@@ -74,7 +120,7 @@ watch(
       <div class="chat-title-block">
         <h1>{{ props.conversation ? targetName : '选择会话' }}</h1>
         <span class="chat-ribbon">
-          <template v-if="props.conversation">@{{ props.conversation.target_user.username }} · LightChat 会话</template>
+          <template v-if="props.conversation">@{{ props.conversation.target_user.username }} · {{ socketLabel }}</template>
           <template v-else>选择一个会话开始聊天</template>
         </span>
       </div>
@@ -91,9 +137,13 @@ watch(
       </div>
     </header>
 
-    <main class="chat-body message-list-area">
+    <main ref="listRef" class="chat-body message-list-area">
       <div v-if="!props.conversation" class="chat-placeholder">
         选择一个会话开始聊天
+      </div>
+
+      <div v-else-if="loadingHistory" class="chat-empty-state">
+        正在加载消息...
       </div>
 
       <div v-else-if="currentMessages.length === 0" class="chat-empty-state">
@@ -104,10 +154,10 @@ watch(
         <article
           v-for="message in currentMessages"
           :key="message.id"
-          :class="['mock-message', { mine: message.sender === 'me' }]"
+          :class="['mock-message', { mine: isMine(message) }]"
         >
-          <div class="message-bubble">{{ message.content }}</div>
-          <time>{{ message.time }}</time>
+          <div class="message-bubble">{{ displayContent(message) }}</div>
+          <time>{{ formatTime(message.create_time) }}</time>
         </article>
       </div>
     </main>
@@ -128,15 +178,16 @@ watch(
 
         <textarea
           v-model="inputText"
-          :disabled="!props.conversation"
-          placeholder="输入消息，Ctrl + Enter 发送"
+          :disabled="!props.conversation || !messageStore.isSocketConnected"
+          :placeholder="messageStore.isSocketConnected ? '输入消息，Ctrl + Enter 发送' : 'WebSocket 未连接，正在尝试重连'"
           @keydown="handleKeydown"
         ></textarea>
 
         <div class="chat-input-actions">
+          <p v-if="localError || socketError" class="chat-send-error">{{ localError || socketError }}</p>
           <button :disabled="!canSend" type="button" @click="sendMessage">
             <Send :size="16" stroke-width="2" />
-            <span>发送</span>
+            <span>{{ sending ? '发送中' : '发送' }}</span>
           </button>
         </div>
       </section>

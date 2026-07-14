@@ -1,5 +1,5 @@
 ﻿<script lang="ts" setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { GetUserInfo } from '../../wailsjs/go/main/App'
@@ -9,6 +9,7 @@ import FriendView from '../components/FriendView.vue'
 import Sidebar from '../components/Sidebar.vue'
 import { clearToken, getToken } from '../services/session'
 import { useConversationStore } from '../stores/conversation'
+import { useMessageStore } from '../stores/message'
 import type { ConversationItemData } from '../api/conversation'
 import type { NavKey } from '../types/chat'
 
@@ -24,6 +25,7 @@ interface UserResponse {
 
 const router = useRouter()
 const conversationStore = useConversationStore()
+const messageStore = useMessageStore()
 const { conversationList, currentConversation, loading } = storeToRefs(conversationStore)
 
 const user = ref<UserResponse | null>(null)
@@ -52,6 +54,8 @@ async function loadCurrentUser() {
 
   try {
     user.value = await GetUserInfo(token)
+    messageStore.setCurrentUserId(user.value.id)
+    messageStore.connect()
   } catch {
     clearToken()
     await router.replace({ name: 'login' })
@@ -109,11 +113,15 @@ function updateActiveNav(value: NavKey) {
 }
 
 async function logout() {
+  messageStore.disconnect()
   clearToken()
   await router.replace({ name: 'login' })
 }
 
 onMounted(loadCurrentUser)
+onUnmounted(() => {
+  messageStore.disconnect()
+})
 </script>
 
 <template>
