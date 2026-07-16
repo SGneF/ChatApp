@@ -8,7 +8,8 @@ const (
 	MessageTypeFile  = "file"
 	MessageTypeVoice = "voice"
 
-	MessageStatusNormal  = "normal"
+	MessageStatusSent    = "sent"
+	MessageStatusRead    = "read"
 	MessageStatusRevoked = "revoked"
 )
 
@@ -25,7 +26,7 @@ type Message struct {
 	Type    string `gorm:"type:varchar(20);not null" json:"type"`
 	Content string `gorm:"type:text;not null" json:"content"`
 
-	Status string `gorm:"type:varchar(20);not null;default:'normal'" json:"status"`
+	Status string `gorm:"type:varchar(20);not null;default:'sent'" json:"status"`
 
 	CreateTime time.Time `gorm:"column:create_time;autoCreateTime" json:"create_time"`
 	UpdateTime time.Time `gorm:"column:update_time;autoUpdateTime" json:"update_time"`

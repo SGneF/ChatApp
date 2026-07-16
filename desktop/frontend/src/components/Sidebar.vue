@@ -1,4 +1,4 @@
-﻿<script lang="ts" setup>
+<script lang="ts" setup>
 import { Bot, Contact, LogOut, MessageCircle, Settings } from 'lucide-vue-next'
 import type { NavKey } from '../types/chat'
 
@@ -26,10 +26,6 @@ function initials(name: string) {
 
 <template>
   <aside class="app-sidebar">
-    <div class="club-logo" aria-label="LightChat">
-      <strong>LC</strong>
-    </div>
-
     <div class="sidebar-avatar" :title="props.userName">
       <img v-if="props.userAvatar" :alt="props.userName" :src="props.userAvatar" />
       <span v-else>{{ initials(props.userName) }}</span>

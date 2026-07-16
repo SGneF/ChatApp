@@ -1,7 +1,12 @@
-﻿import { defineStore } from 'pinia'
+import { defineStore } from 'pinia'
 import { getMessageHistory, type MessageResponse } from '../api/message'
 import { getToken } from '../services/session'
-import { chatSocket, type ChatSocketEvent, type ChatSocketStatus } from '../services/chatSocket'
+import {
+  chatSocket,
+  type ChatSocketEvent,
+  type ChatSocketOfflineSyncData,
+  type ChatSocketStatus,
+} from '../services/chatSocket'
 import { useConversationStore } from './conversation'
 
 function sortMessages(list: MessageResponse[]) {
@@ -88,8 +93,32 @@ export const useMessageStore = defineStore('message', {
         return
       }
 
+      if (event.type === 'offline_sync') {
+        void this.handleOfflineSync(event.data)
+        return
+      }
+
       this.appendMessage(event.data)
       this.updateConversationByMessage(event.data)
+    },
+
+    async handleOfflineSync(data: ChatSocketOfflineSyncData) {
+      const conversationStore = useConversationStore()
+      await conversationStore.fetchConversationList().catch(() => undefined)
+
+      const offlineMessages = data.conversations.flatMap((item) => item.messages || [])
+      offlineMessages.forEach((message) => this.appendMessage(message))
+
+      const currentConversationId = conversationStore.currentConversation?.id
+      if (!currentConversationId) return
+
+      const currentHasOfflineMessages = data.conversations.some(
+        (item) => item.conversation_id === currentConversationId,
+      )
+      if (!currentHasOfflineMessages) return
+
+      await this.loadHistory(currentConversationId).catch(() => undefined)
+      await conversationStore.markRead(currentConversationId).catch(() => undefined)
     },
 
     appendMessage(message: MessageResponse) {

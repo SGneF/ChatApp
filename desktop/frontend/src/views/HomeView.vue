@@ -1,4 +1,4 @@
-﻿<script lang="ts" setup>
+<script lang="ts" setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
@@ -146,7 +146,11 @@ onUnmounted(() => {
         @toggle-top="toggleConversationTop"
       />
 
-      <ChatPanel :conversation="currentConversation" />
+      <ChatPanel
+        :conversation="currentConversation"
+        :current-user-avatar="userAvatar"
+        :current-user-name="userName"
+      />
     </template>
 
     <div v-if="pageError" class="home-toast error">{{ pageError }}</div>

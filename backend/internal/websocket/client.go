@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	writeWait  = 10 * time.Second
-	pongWait   = 60 * time.Second
-	pingPeriod = 50 * time.Second
+	writeWait  = 10 * time.Second //每次写消息最多允许花费 10 秒。
+	pongWait   = 60 * time.Second //服务端最多等待客户端 60 秒的 Pong。
+	pingPeriod = 50 * time.Second //服务端每 50 秒发送一次 Ping。
 	maxMsgSize = 5120
 )
 
@@ -27,12 +27,19 @@ type Client struct {
 	Conn *gorillawebsocket.Conn
 	Send chan []byte
 
-	DB *gorm.DB
+	DB     *gorm.DB
+	Online *OnlineService
 }
 
+// 读取客户端消息
 func (c *Client) ReadPump() {
 	defer func() {
-		c.Hub.Unregister(c)
+		//连接退出处理
+		noLocalClients := c.Hub.Unregister(c)
+
+		if noLocalClients {
+			_ = c.Online.SetOffline(context.Background(), c.UserID)
+		}
 		_ = c.Conn.Close()
 	}()
 
@@ -64,8 +71,9 @@ func (c *Client) ReadPump() {
 	}
 }
 
+// 这个协程负责两件事：1.从 Send 队列取出业务消息并发送；2.定时发送 Ping 心跳
 func (c *Client) WritePump() {
-	ticker := time.NewTicker(pingPeriod)
+	ticker := time.NewTicker(pingPeriod) //一个定时触发器（Ticker），，每隔指定时间 pingPeriod 自动往自身的 C 通道发送当前时间，循环持续触发，直到手动停止。
 	defer func() {
 		ticker.Stop()
 		_ = c.Conn.Close()
@@ -74,7 +82,7 @@ func (c *Client) WritePump() {
 	for {
 		select {
 		case msg, ok := <-c.Send:
-			_ = c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = c.Conn.SetWriteDeadline(time.Now().Add(writeWait)) //设置写超时
 
 			if !ok {
 				_ = c.Conn.WriteMessage(gorillawebsocket.CloseMessage, []byte{})
@@ -86,6 +94,8 @@ func (c *Client) WritePump() {
 			}
 
 		case <-ticker.C:
+			_ = c.Online.RefreshOnline(context.Background(), c.UserID)
+
 			_ = c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 
 			if err := c.Conn.WriteMessage(gorillawebsocket.PingMessage, nil); err != nil {
@@ -121,13 +131,13 @@ func (c *Client) handleChatMessage(raw json.RawMessage) {
 		return
 	}
 
-	// 1. 给发送者返回 ack
+	// 给发送者返回 ack
 	c.sendJSON(OutgoingMessage{
 		Type: EventChatAck,
 		Data: msgResp,
 	})
 
-	// 2. 如果接收者在线，推送给接收者
+	// 推送给接收者
 	c.Hub.SendToUser(msgResp.ReceiverID, OutgoingMessage{
 		Type: EventChatMessage,
 		Data: msgResp,
@@ -149,8 +159,9 @@ func (c *Client) sendJSON(msg OutgoingMessage) {
 		return
 	}
 
-	select {
+	select { //这里是非阻塞写入。如果 Send 队列已经满了，就执行 default，直接丢弃消息。
 	case c.Send <- data:
 	default:
+		log.Println("消息发送队列已满，丢弃消息", c.UserID)
 	}
 }

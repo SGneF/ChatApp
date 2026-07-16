@@ -1,4 +1,4 @@
-﻿import type { MessageResponse, MessageType } from '../api/message'
+import type { MessageResponse, MessageType } from '../api/message'
 
 export type ChatSocketStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
 
@@ -22,7 +22,32 @@ export interface ChatSocketErrorEvent {
   }
 }
 
-export type ChatSocketEvent = ChatSocketConnectedEvent | ChatSocketMessageEvent | ChatSocketErrorEvent
+export interface ChatSocketOfflineSyncConversation {
+  conversation_id: number
+  target_id: number
+  unread_count: number
+  last_message_id: number
+  last_message: string
+  update_time: string
+  messages: MessageResponse[]
+}
+
+export interface ChatSocketOfflineSyncData {
+  has_unread: boolean
+  unread_total: number
+  conversations: ChatSocketOfflineSyncConversation[]
+}
+
+export interface ChatSocketOfflineSyncEvent {
+  type: 'offline_sync'
+  data: ChatSocketOfflineSyncData
+}
+
+export type ChatSocketEvent =
+  | ChatSocketConnectedEvent
+  | ChatSocketMessageEvent
+  | ChatSocketErrorEvent
+  | ChatSocketOfflineSyncEvent
 
 type MessageListener = (event: ChatSocketEvent) => void
 type StatusListener = (status: ChatSocketStatus) => void

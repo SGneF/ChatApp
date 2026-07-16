@@ -21,6 +21,20 @@ type MessageHistoryResponse struct {
 	PageSize int               `json:"page_size"`
 }
 
+type MessageReadResponse struct {
+	ConversationID uint64 `json:"conversation_id"`
+	ReaderID       uint64 `json:"reader_id"`
+	TargetID       uint64 `json:"target_id"`
+	ReadCount      int64  `json:"read_count"`
+}
+
+type MessageRevokeResponse struct {
+	MessageID  uint64 `json:"message_id"`
+	SenderID   uint64 `json:"sender_id"`
+	ReceiverID uint64 `json:"receiver_id"`
+	Status     string `json:"status"`
+}
+
 func ToMessageResponse(m Message) MessageResponse {
 	return MessageResponse{
 		ID:             m.ID,

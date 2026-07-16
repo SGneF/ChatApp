@@ -1,4 +1,4 @@
-﻿<script lang="ts" setup>
+<script lang="ts" setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Image, MoreHorizontal, Paperclip, Phone, Search, Send, Smile } from 'lucide-vue-next'
@@ -8,6 +8,8 @@ import { useMessageStore } from '../../stores/message'
 
 const props = defineProps<{
   conversation: ConversationItemData | null
+  currentUserAvatar?: string
+  currentUserName?: string
 }>()
 
 const messageStore = useMessageStore()
@@ -48,8 +50,22 @@ const socketLabel = computed(() => {
   }
 })
 
+function initials(name: string) {
+  return (name || '用户').trim().slice(0, 2).toUpperCase()
+}
+
 function isMine(message: MessageResponse) {
   return message.sender_id === messageStore.currentUserId
+}
+
+function avatarFor(message: MessageResponse) {
+  if (isMine(message)) return props.currentUserAvatar || ''
+  return props.conversation?.target_user.avatar || ''
+}
+
+function avatarNameFor(message: MessageResponse) {
+  if (isMine(message)) return props.currentUserName || '我'
+  return targetName.value || '对方'
 }
 
 function formatTime(value: string) {
@@ -156,8 +172,15 @@ watch(() => currentMessages.value.length, scrollToBottom)
           :key="message.id"
           :class="['mock-message', { mine: isMine(message) }]"
         >
-          <div class="message-bubble">{{ displayContent(message) }}</div>
-          <time>{{ formatTime(message.create_time) }}</time>
+          <div class="message-avatar" :title="avatarNameFor(message)">
+            <img v-if="avatarFor(message)" :alt="avatarNameFor(message)" :src="avatarFor(message)" />
+            <span v-else>{{ initials(avatarNameFor(message)) }}</span>
+          </div>
+
+          <div class="message-content">
+            <div class="message-bubble">{{ displayContent(message) }}</div>
+            <time>{{ formatTime(message.create_time) }}</time>
+          </div>
         </article>
       </div>
     </main>
