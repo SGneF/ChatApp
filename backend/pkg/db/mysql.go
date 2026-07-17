@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"chatapp-backend/internal/conversation"
+	"chatapp-backend/internal/file"
 	"chatapp-backend/internal/friend"
 	"chatapp-backend/internal/message"
 	"chatapp-backend/internal/user"
@@ -48,5 +49,6 @@ func AutoMigrate(database *gorm.DB) error {
 		&friend.Friend{},
 		&conversation.Conversation{},
 		&message.Message{},
+		&file.FileRecord{},
 	)
 }

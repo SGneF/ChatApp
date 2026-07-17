@@ -87,7 +87,7 @@ func (h *Handler) Revoke(c *gin.Context) {
 		return
 	}
 
-	err = h.service.Revoke(c.Request.Context(), currentUserID, messageID)
+	revokeResp, err := h.service.Revoke(c.Request.Context(), currentUserID, messageID)
 
 	switch {
 	case errors.Is(err, ErrMessageNotFound):
@@ -101,7 +101,7 @@ func (h *Handler) Revoke(c *gin.Context) {
 	case err != nil:
 		response.Fail(c, http.StatusInternalServerError, "撤回消息失败")
 	default:
-		response.Success(c, gin.H{"message": "消息已撤回"})
+		response.Success(c, revokeResp)
 	}
 }
 

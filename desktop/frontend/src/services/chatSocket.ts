@@ -1,4 +1,4 @@
-import type { MessageResponse, MessageType } from '../api/message'
+import type { MessageReadResponse, MessageResponse, MessageRevokeResponse, MessageType } from '../api/message'
 
 export type ChatSocketStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
 
@@ -13,6 +13,16 @@ export interface ChatSocketConnectedEvent {
 export interface ChatSocketMessageEvent {
   type: 'chat_ack' | 'chat_message'
   data: MessageResponse
+}
+
+export interface ChatSocketReadEvent {
+  type: 'message_read' | 'message_read_ack'
+  data: MessageReadResponse
+}
+
+export interface ChatSocketRevokeEvent {
+  type: 'message_revoke' | 'message_revoke_ack'
+  data: MessageRevokeResponse
 }
 
 export interface ChatSocketErrorEvent {
@@ -46,6 +56,8 @@ export interface ChatSocketOfflineSyncEvent {
 export type ChatSocketEvent =
   | ChatSocketConnectedEvent
   | ChatSocketMessageEvent
+  | ChatSocketReadEvent
+  | ChatSocketRevokeEvent
   | ChatSocketErrorEvent
   | ChatSocketOfflineSyncEvent
 
@@ -138,20 +150,32 @@ class ChatSocketClient {
   }
 
   sendChatMessage(conversationId: number, content: string, type: MessageType = 'text') {
-    const payload = {
+    this.sendPayload({
       type: 'chat_message',
       data: {
         conversation_id: conversationId,
         type,
         content,
       },
-    }
+    })
+  }
 
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      throw new Error('WebSocket 未连接')
-    }
+  sendMessageRead(conversationId: number) {
+    this.sendPayload({
+      type: 'message_read',
+      data: {
+        conversation_id: conversationId,
+      },
+    })
+  }
 
-    this.socket.send(JSON.stringify(payload))
+  sendMessageRevoke(messageId: number) {
+    this.sendPayload({
+      type: 'message_revoke',
+      data: {
+        message_id: messageId,
+      },
+    })
   }
 
   onMessage(listener: MessageListener) {
@@ -163,6 +187,14 @@ class ChatSocketClient {
     this.statusListeners.add(listener)
     listener(this.status)
     return () => this.statusListeners.delete(listener)
+  }
+
+  private sendPayload(payload: unknown) {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket 未连接')
+    }
+
+    this.socket.send(JSON.stringify(payload))
   }
 
   private scheduleReconnect() {

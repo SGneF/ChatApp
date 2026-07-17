@@ -59,7 +59,7 @@ func (s *Service) Send(ctx context.Context, currentUserID uint64, req SendMessag
 			ReceiverID:     receiverID,
 			Type:           msgType,
 			Content:        req.Content,
-			Status:         MessageStatusNormal,
+			Status:         MessageStatusSent,
 		}
 
 		if err := tx.Create(&msg).Error; err != nil {
@@ -191,8 +191,7 @@ func (s *Service) History(ctx context.Context, currentUserID uint64, conversatio
 		PageSize: pageSize,
 	}, nil
 }
-
-func (s *Service) Revoke(ctx context.Context, currentUserID uint64, messageID uint64) error {
+func (s *Service) Revoke(ctx context.Context, currentUserID uint64, messageID uint64) (*MessageRevokeResponse, error) {
 	var msg Message
 
 	err := s.db.WithContext(ctx).
@@ -200,26 +199,26 @@ func (s *Service) Revoke(ctx context.Context, currentUserID uint64, messageID ui
 		First(&msg).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ErrMessageNotFound
+		return nil, ErrMessageNotFound
 	}
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if msg.SenderID != currentUserID {
-		return ErrNoPermission
+		return nil, ErrNoPermission
 	}
 
 	if msg.Status == MessageStatusRevoked {
-		return ErrMessageAlreadyRevoked
+		return nil, ErrMessageAlreadyRevoked
 	}
 
 	if time.Since(msg.CreateTime) > 2*time.Minute {
-		return ErrRevokeTimeout
+		return nil, ErrRevokeTimeout
 	}
 
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now()
 
 		if err := tx.Model(&Message{}).
@@ -232,7 +231,7 @@ func (s *Service) Revoke(ctx context.Context, currentUserID uint64, messageID ui
 			return err
 		}
 
-		// 如果这条消息正好是双方会话的最后一条，就更新会话展示文本
+		// 如果这条消息是最后一条消息，更新双方会话的 last_message
 		if err := tx.Model(&conversation.Conversation{}).
 			Where(
 				"last_message_id = ? AND ((user_id = ? AND target_id = ?) OR (user_id = ? AND target_id = ?))",
@@ -251,6 +250,17 @@ func (s *Service) Revoke(ctx context.Context, currentUserID uint64, messageID ui
 
 		return nil
 	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &MessageRevokeResponse{
+		MessageID:  msg.ID,
+		SenderID:   msg.SenderID,
+		ReceiverID: msg.ReceiverID,
+		Status:     MessageStatusRevoked,
+	}, nil
 }
 
 func buildLastMessagePreview(msgType string, content string) string {
@@ -278,4 +288,62 @@ func reverseMessages(messages []Message) {
 		left++
 		right--
 	}
+}
+
+func (s *Service) MarkConversationRead(ctx context.Context, currentUserID uint64, conversationID uint64) (*MessageReadResponse, error) {
+	var c conversation.Conversation
+
+	err := s.db.WithContext(ctx).
+		Where("id = ? AND user_id = ?", conversationID, currentUserID).
+		First(&c).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrConversationNotFound
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	targetID := c.TargetID
+
+	var readCount int64
+
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. 清空当前用户这个会话的未读数
+		if err := tx.Model(&conversation.Conversation{}).
+			Where("id = ? AND user_id = ?", conversationID, currentUserID).
+			Update("unread_count", 0).Error; err != nil {
+			return err
+		}
+
+		// 2. 把“对方发给我”的消息标记为已读
+		result := tx.Model(&Message{}).
+			Where(
+				"sender_id = ? AND receiver_id = ? AND status = ?",
+				targetID,
+				currentUserID,
+				MessageStatusSent,
+			).
+			Update("status", MessageStatusRead)
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		readCount = result.RowsAffected
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &MessageReadResponse{
+		ConversationID: conversationID,
+		ReaderID:       currentUserID,
+		TargetID:       targetID,
+		ReadCount:      readCount,
+	}, nil
 }

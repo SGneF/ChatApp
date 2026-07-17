@@ -1,7 +1,7 @@
-﻿import request from './request'
+import request from './request'
 
 export type MessageType = 'text' | 'image' | 'file' | 'voice'
-export type MessageStatus = 'normal' | 'revoked'
+export type MessageStatus = 'normal' | 'sent' | 'read' | 'revoked'
 
 export interface MessageResponse {
   id: number
@@ -22,6 +22,20 @@ export interface MessageHistoryResponse {
   page_size: number
 }
 
+export interface MessageReadResponse {
+  conversation_id: number
+  reader_id: number
+  target_id: number
+  read_count: number
+}
+
+export interface MessageRevokeResponse {
+  message_id: number
+  sender_id: number
+  receiver_id: number
+  status: 'revoked'
+}
+
 export function getMessageHistory(conversationId: number, page = 1, pageSize = 30) {
   return request.get<MessageHistoryResponse, MessageHistoryResponse>('/message/history', {
     params: {
@@ -30,4 +44,8 @@ export function getMessageHistory(conversationId: number, page = 1, pageSize = 3
       page_size: pageSize,
     },
   })
+}
+
+export function revokeMessageRequest(messageId: number) {
+  return request.post<MessageRevokeResponse, MessageRevokeResponse>(`/message/${messageId}/revoke`)
 }

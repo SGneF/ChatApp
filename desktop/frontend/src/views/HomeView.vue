@@ -6,6 +6,7 @@ import { GetUserInfo } from '../../wailsjs/go/main/App'
 import ChatPanel from '../components/chat/ChatPanel.vue'
 import ConversationList from '../components/conversation/ConversationList.vue'
 import FriendView from '../components/FriendView.vue'
+import ProfileModal from '../components/ProfileModal.vue'
 import Sidebar from '../components/Sidebar.vue'
 import { clearToken, getToken } from '../services/session'
 import { useConversationStore } from '../stores/conversation'
@@ -31,6 +32,7 @@ const { conversationList, currentConversation, loading } = storeToRefs(conversat
 const user = ref<UserResponse | null>(null)
 const activeNav = ref<NavKey>('messages')
 const pageError = ref('')
+const profileVisible = ref(false)
 
 const userName = computed(() => {
   if (!user.value) return 'LightChat'
@@ -112,6 +114,18 @@ function updateActiveNav(value: NavKey) {
   }
 }
 
+function openProfile() {
+  if (!user.value) return
+  pageError.value = ''
+  profileVisible.value = true
+}
+
+function handleProfileSaved(nextUser: UserResponse) {
+  user.value = nextUser
+  messageStore.setCurrentUserId(nextUser.id)
+  pageError.value = ''
+}
+
 async function logout() {
   messageStore.disconnect()
   clearToken()
@@ -131,6 +145,7 @@ onUnmounted(() => {
       :user-avatar="userAvatar"
       :user-name="userName"
       @logout="logout"
+      @open-profile="openProfile"
       @update:active-nav="updateActiveNav"
     />
 
@@ -152,6 +167,13 @@ onUnmounted(() => {
         :current-user-name="userName"
       />
     </template>
+
+    <ProfileModal
+      v-if="profileVisible && user"
+      :user="user"
+      @close="profileVisible = false"
+      @saved="handleProfileSaved"
+    />
 
     <div v-if="pageError" class="home-toast error">{{ pageError }}</div>
   </main>

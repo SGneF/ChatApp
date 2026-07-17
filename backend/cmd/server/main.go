@@ -1,16 +1,18 @@
-package main
+﻿package main
 
 import (
 	"log"
 	"net/http"
 
 	"chatapp-backend/internal/conversation"
+	"chatapp-backend/internal/file"
 	"chatapp-backend/internal/friend"
 	"chatapp-backend/internal/message"
 	"chatapp-backend/internal/user"
 	ws "chatapp-backend/internal/websocket"
 	"chatapp-backend/pkg/db"
-	pkgredis "chatapp-backend/pkg/redis"
+	"chatapp-backend/pkg/minio"
+	"chatapp-backend/pkg/redis"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,13 +24,18 @@ func main() {
 	}
 
 	var onlineService *ws.OnlineService
-	redisClient, err := pkgredis.InitRedis()
+	redisClient, err := redis.InitRedis()
 	if err != nil {
 		log.Println("Redis init failed, websocket online state will use local memory only:", err)
 	} else {
 		defer redisClient.Close()
 		onlineService = ws.NewOnlineService(redisClient)
 		log.Println("Redis connected, websocket online state enabled")
+	}
+
+	minioClient, err := minio.InitMinIO()
+	if err != nil {
+		log.Fatal("MinIO 初始化失败：", err)
 	}
 
 	r := gin.Default()
@@ -61,6 +68,7 @@ func main() {
 		friend.RegisterRoutes(api, database)
 		conversation.RegisterRoutes(api, database)
 		message.RegisterRoutes(api, database)
+		file.RegisterRoutes(api, database, minioClient)
 	}
 
 	ws.RegisterRoutes(r, database, onlineService)

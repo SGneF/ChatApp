@@ -1,4 +1,4 @@
-﻿import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
+import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import { getToken } from '../services/session'
 
 interface ApiEnvelope<T> {
@@ -30,7 +30,15 @@ request.interceptors.response.use(
     return response.data
   },
   (error: AxiosError<ApiEnvelope<unknown>>) => {
-    const message = error.response?.data?.msg || error.message || '网络请求失败'
+    if (error.code === 'ECONNABORTED') {
+      return Promise.reject(new Error('请求超时，请检查后端服务或网络连接'))
+    }
+
+    if (!error.response) {
+      return Promise.reject(new Error('无法连接后端服务，请确认后端已启动并监听 http://127.0.0.1:8080'))
+    }
+
+    const message = error.response.data?.msg || `请求失败（HTTP ${error.response.status}）`
     return Promise.reject(new Error(message))
   },
 )

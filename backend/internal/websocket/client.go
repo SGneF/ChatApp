@@ -65,6 +65,13 @@ func (c *Client) ReadPump() {
 		switch incoming.Type {
 		case EventChatMessage:
 			c.handleChatMessage(incoming.Data)
+
+		case EventMessageRead:
+			c.handleMessageRead(incoming.Data)
+
+		case EventMessageRevoke:
+			c.handleMessageRevoke(incoming.Data)
+
 		default:
 			c.sendError("未知消息类型")
 		}
@@ -141,6 +148,72 @@ func (c *Client) handleChatMessage(raw json.RawMessage) {
 	c.Hub.SendToUser(msgResp.ReceiverID, OutgoingMessage{
 		Type: EventChatMessage,
 		Data: msgResp,
+	})
+}
+
+func (c *Client) handleMessageRead(raw json.RawMessage) {
+	var data MessageReadData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		c.sendError("已读消息格式错误")
+		return
+	}
+
+	if data.ConversationID == 0 {
+		c.sendError("会话ID不能为空")
+		return
+	}
+
+	msgService := message.NewService(c.DB)
+
+	readResp, err := msgService.MarkConversationRead(context.Background(), c.UserID, data.ConversationID)
+	if err != nil {
+		c.sendError("标记已读失败")
+		return
+	}
+
+	// 1. 给当前用户返回 ack
+	c.sendJSON(OutgoingMessage{
+		Type: EventMessageReadAck,
+		Data: readResp,
+	})
+
+	// 2. 通知对方：我已读了
+	c.Hub.SendToUser(readResp.TargetID, OutgoingMessage{
+		Type: EventMessageRead,
+		Data: readResp,
+	})
+}
+
+func (c *Client) handleMessageRevoke(raw json.RawMessage) {
+	var data MessageRevokeData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		c.sendError("撤回消息格式错误")
+		return
+	}
+
+	if data.MessageID == 0 {
+		c.sendError("消息ID不能为空")
+		return
+	}
+
+	msgService := message.NewService(c.DB)
+
+	revokeResp, err := msgService.Revoke(context.Background(), c.UserID, data.MessageID)
+	if err != nil {
+		c.sendError("撤回消息失败")
+		return
+	}
+
+	// 1. 给发送者返回撤回成功 ack
+	c.sendJSON(OutgoingMessage{
+		Type: EventMessageRevokeAck,
+		Data: revokeResp,
+	})
+
+	// 2. 通知接收者：这条消息已撤回
+	c.Hub.SendToUser(revokeResp.ReceiverID, OutgoingMessage{
+		Type: EventMessageRevoke,
+		Data: revokeResp,
 	})
 }
 

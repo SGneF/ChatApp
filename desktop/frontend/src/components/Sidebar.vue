@@ -11,6 +11,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'update:activeNav', value: NavKey): void
   (event: 'logout'): void
+  (event: 'open-profile'): void
 }>()
 
 const navItems: Array<{ key: NavKey; label: string; icon: typeof MessageCircle }> = [
@@ -26,10 +27,10 @@ function initials(name: string) {
 
 <template>
   <aside class="app-sidebar">
-    <div class="sidebar-avatar" :title="props.userName">
+    <button class="sidebar-avatar" :title="`查看个人资料：${props.userName}`" type="button" @click="emit('open-profile')">
       <img v-if="props.userAvatar" :alt="props.userName" :src="props.userAvatar" />
       <span v-else>{{ initials(props.userName) }}</span>
-    </div>
+    </button>
 
     <nav class="sidebar-nav" aria-label="主导航">
       <button

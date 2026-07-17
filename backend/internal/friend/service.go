@@ -58,6 +58,7 @@ func (s *Service) Apply(ctx context.Context, fromUserID uint64, req ApplyFriendR
 		return err
 	}
 	if count > 0 {
+
 		return ErrRequestExists
 	}
 

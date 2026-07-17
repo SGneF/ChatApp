@@ -1,9 +1,17 @@
 <script lang="ts" setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { Image, MoreHorizontal, Paperclip, Phone, Search, Send, Smile } from 'lucide-vue-next'
+import { Image, Mic, MoreHorizontal, Paperclip, Phone, RotateCcw, Search, Send, Smile } from 'lucide-vue-next'
 import type { ConversationItemData } from '../../api/conversation'
 import type { MessageResponse } from '../../api/message'
+import {
+  createFileMessageContent,
+  formatFileSize,
+  parseFileMessageContent,
+  uploadFile,
+  type FileMessagePayload,
+  type UploadFileType,
+} from '../../api/file'
 import { useMessageStore } from '../../stores/message'
 
 const props = defineProps<{
@@ -18,7 +26,11 @@ const { loadingHistory, messagesByConversation, socketError, socketStatus } = st
 const inputText = ref('')
 const sending = ref(false)
 const localError = ref('')
+const uploadingType = ref<UploadFileType | ''>('')
 const listRef = ref<HTMLElement | null>(null)
+const imageInputRef = ref<HTMLInputElement | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const voiceInputRef = ref<HTMLInputElement | null>(null)
 
 const targetName = computed(() => {
   const user = props.conversation?.target_user
@@ -33,6 +45,10 @@ const currentMessages = computed(() => {
 
 const canSend = computed(() => {
   return Boolean(props.conversation) && inputText.value.trim() !== '' && !sending.value && messageStore.isSocketConnected
+})
+
+const canUpload = computed(() => {
+  return Boolean(props.conversation) && !uploadingType.value && messageStore.isSocketConnected
 })
 
 const socketLabel = computed(() => {
@@ -68,6 +84,10 @@ function avatarNameFor(message: MessageResponse) {
   return targetName.value || '对方'
 }
 
+function isReadableIncoming(message: MessageResponse) {
+  return !isMine(message) && (message.status === 'normal' || message.status === 'sent')
+}
+
 function formatTime(value: string) {
   if (!value) return ''
   const date = new Date(value)
@@ -76,11 +96,52 @@ function formatTime(value: string) {
 }
 
 function displayContent(message: MessageResponse) {
-  if (message.status === 'revoked') return '撤回了一条消息'
   if (message.type === 'image') return '[图片]'
   if (message.type === 'file') return '[文件]'
   if (message.type === 'voice') return '[语音]'
   return message.content
+}
+
+function filePayload(message: MessageResponse): FileMessagePayload | null {
+  if (message.type === 'text') return null
+  return parseFileMessageContent(message.content)
+}
+
+function fileName(message: MessageResponse) {
+  return filePayload(message)?.file_name || displayContent(message)
+}
+
+function fileURL(message: MessageResponse) {
+  return filePayload(message)?.url || ''
+}
+
+function fileSizeLabel(message: MessageResponse) {
+  const payload = filePayload(message)
+  return payload ? formatFileSize(payload.size) : ''
+}
+
+function revokeNotice(message: MessageResponse) {
+  return isMine(message) ? '你撤回了一条消息' : '对方撤回了一条消息'
+}
+
+function deliveryLabel(message: MessageResponse) {
+  if (!isMine(message) || message.status === 'revoked') return ''
+  if (message.status === 'read') return '已读'
+  return '已送达'
+}
+
+function canRevoke(message: MessageResponse) {
+  if (!isMine(message) || message.status === 'revoked' || !messageStore.isSocketConnected) return false
+  const createdAt = new Date(message.create_time).getTime()
+  if (Number.isNaN(createdAt)) return false
+  return Date.now() - createdAt <= 2 * 60 * 1000
+}
+
+function syncReadIfNeeded() {
+  if (!props.conversation || !messageStore.isSocketConnected) return
+  if (!messageStore.isActivelyReadingConversation(props.conversation.id)) return
+  if (!currentMessages.value.some(isReadableIncoming)) return
+  messageStore.markConversationRead(props.conversation.id)
 }
 
 async function sendMessage() {
@@ -95,6 +156,48 @@ async function sendMessage() {
     localError.value = err instanceof Error ? err.message : '消息发送失败'
   } finally {
     sending.value = false
+  }
+}
+
+function openFilePicker(type: UploadFileType) {
+  if (!canUpload.value) return
+
+  if (type === 'image') imageInputRef.value?.click()
+  if (type === 'file') fileInputRef.value?.click()
+  if (type === 'voice') voiceInputRef.value?.click()
+}
+
+async function handleFileSelected(event: Event, type: UploadFileType) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+
+  if (!file || !props.conversation) return
+  if (!messageStore.isSocketConnected) {
+    localError.value = 'WebSocket 未连接，暂时不能发送文件'
+    return
+  }
+
+  uploadingType.value = type
+  localError.value = ''
+  try {
+    const uploaded = await uploadFile(file, type)
+    messageStore.sendMessage(props.conversation.id, type, createFileMessageContent(uploaded))
+  } catch (err) {
+    localError.value = err instanceof Error ? err.message : '文件上传失败'
+  } finally {
+    uploadingType.value = ''
+  }
+}
+
+function revokeMessage(message: MessageResponse) {
+  if (!canRevoke(message)) return
+
+  localError.value = ''
+  try {
+    messageStore.revokeMessage(message.id)
+  } catch (err) {
+    localError.value = err instanceof Error ? err.message : '撤回消息失败'
   }
 }
 
@@ -114,20 +217,37 @@ async function scrollToBottom() {
 
 watch(
   () => props.conversation?.id,
-  async (id) => {
+  async (id, oldId) => {
+    if (oldId) {
+      messageStore.clearActiveReadingConversation(oldId)
+    }
+
     inputText.value = ''
     localError.value = ''
-    if (id) {
-      await messageStore.loadHistory(id).catch((err) => {
-        localError.value = err instanceof Error ? err.message : '加载历史消息失败'
-      })
-      await scrollToBottom()
+
+    if (!id) {
+      messageStore.clearActiveReadingConversation()
+      return
     }
+
+    messageStore.setActiveReadingConversation(id)
+    await messageStore.loadHistory(id).catch((err) => {
+      localError.value = err instanceof Error ? err.message : '加载历史消息失败'
+    })
+    syncReadIfNeeded()
+    await scrollToBottom()
   },
   { immediate: true },
 )
 
-watch(() => currentMessages.value.length, scrollToBottom)
+watch(() => currentMessages.value.length, async () => {
+  syncReadIfNeeded()
+  await scrollToBottom()
+})
+
+onUnmounted(() => {
+  messageStore.clearActiveReadingConversation(props.conversation?.id)
+})
 </script>
 
 <template>
@@ -167,21 +287,72 @@ watch(() => currentMessages.value.length, scrollToBottom)
       </div>
 
       <div v-else class="mock-message-list">
-        <article
-          v-for="message in currentMessages"
-          :key="message.id"
-          :class="['mock-message', { mine: isMine(message) }]"
-        >
-          <div class="message-avatar" :title="avatarNameFor(message)">
-            <img v-if="avatarFor(message)" :alt="avatarNameFor(message)" :src="avatarFor(message)" />
-            <span v-else>{{ initials(avatarNameFor(message)) }}</span>
-          </div>
+        <template v-for="message in currentMessages" :key="message.id">
+          <article v-if="message.status === 'revoked'" class="message-system">
+            <span>{{ revokeNotice(message) }}</span>
+          </article>
 
-          <div class="message-content">
-            <div class="message-bubble">{{ displayContent(message) }}</div>
-            <time>{{ formatTime(message.create_time) }}</time>
-          </div>
-        </article>
+          <article v-else :class="['mock-message', { mine: isMine(message) }]">
+            <div class="message-avatar" :title="avatarNameFor(message)">
+              <img v-if="avatarFor(message)" :alt="avatarNameFor(message)" :src="avatarFor(message)" />
+              <span v-else>{{ initials(avatarNameFor(message)) }}</span>
+            </div>
+
+            <div class="message-content">
+              <div v-if="message.type === 'image'" class="message-bubble media image-media">
+                <a v-if="fileURL(message)" :href="fileURL(message)" rel="noreferrer" target="_blank">
+                  <img class="message-image" :alt="fileName(message)" :src="fileURL(message)" />
+                </a>
+                <span v-else>{{ displayContent(message) }}</span>
+              </div>
+
+              <div v-else-if="message.type === 'voice'" class="message-bubble media voice-media">
+                <div class="message-voice-card">
+                  <Mic :size="18" stroke-width="2" />
+                  <div class="message-file-info">
+                    <strong>{{ fileName(message) }}</strong>
+                    <span>{{ fileSizeLabel(message) }}</span>
+                  </div>
+                </div>
+                <audio v-if="fileURL(message)" :src="fileURL(message)" controls></audio>
+              </div>
+
+              <div v-else-if="message.type === 'file'" class="message-bubble media file-media">
+                <a v-if="fileURL(message)" class="message-file-card" :href="fileURL(message)" rel="noreferrer" target="_blank">
+                  <span class="message-file-icon"><Paperclip :size="18" stroke-width="2" /></span>
+                  <span class="message-file-info">
+                    <strong>{{ fileName(message) }}</strong>
+                    <small>{{ fileSizeLabel(message) }}</small>
+                  </span>
+                </a>
+                <div v-else class="message-file-card disabled">
+                  <span class="message-file-icon"><Paperclip :size="18" stroke-width="2" /></span>
+                  <span class="message-file-info">
+                    <strong>{{ fileName(message) }}</strong>
+                    <small>{{ fileSizeLabel(message) }}</small>
+                  </span>
+                </div>
+              </div>
+
+              <div v-else class="message-bubble">{{ displayContent(message) }}</div>
+
+              <div class="message-meta">
+                <button
+                  v-if="canRevoke(message)"
+                  class="message-revoke"
+                  title="撤回消息"
+                  type="button"
+                  @click="revokeMessage(message)"
+                >
+                  <RotateCcw :size="13" stroke-width="2" />
+                  <span>撤回</span>
+                </button>
+                <time>{{ formatTime(message.create_time) }}</time>
+                <span v-if="deliveryLabel(message)" class="message-status">{{ deliveryLabel(message) }}</span>
+              </div>
+            </div>
+          </article>
+        </template>
       </div>
     </main>
 
@@ -191,12 +362,37 @@ watch(() => currentMessages.value.length, scrollToBottom)
           <button title="表情" type="button">
             <Smile :size="20" stroke-width="1.8" />
           </button>
-          <button title="文件" type="button">
+          <button :disabled="!canUpload" title="发送文件" type="button" @click="openFilePicker('file')">
             <Paperclip :size="20" stroke-width="1.8" />
           </button>
-          <button title="图片" type="button">
+          <button :disabled="!canUpload" title="发送图片" type="button" @click="openFilePicker('image')">
             <Image :size="20" stroke-width="1.8" />
           </button>
+          <button :disabled="!canUpload" title="发送语音文件" type="button" @click="openFilePicker('voice')">
+            <Mic :size="20" stroke-width="1.8" />
+          </button>
+          <span v-if="uploadingType" class="chat-uploading">上传中...</span>
+
+          <input
+            ref="fileInputRef"
+            class="message-upload-input"
+            type="file"
+            @change="handleFileSelected($event, 'file')"
+          />
+          <input
+            ref="imageInputRef"
+            accept="image/*,.jpg,.jpeg,.png,.gif,.webp"
+            class="message-upload-input"
+            type="file"
+            @change="handleFileSelected($event, 'image')"
+          />
+          <input
+            ref="voiceInputRef"
+            accept="audio/*,.mp3,.wav,.ogg,.m4a,.webm"
+            class="message-upload-input"
+            type="file"
+            @change="handleFileSelected($event, 'voice')"
+          />
         </div>
 
         <textarea

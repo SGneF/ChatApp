@@ -12,7 +12,13 @@ const (
 	EventChatMessage = "chat_message"
 	EventChatAck     = "chat_ack"
 	EventChatError   = "chat_error"
+
 	EventOfflineSync = "offline_sync"
+
+	EventMessageRead      = "message_read"
+	EventMessageReadAck   = "message_read_ack"
+	EventMessageRevoke    = "message_revoke"
+	EventMessageRevokeAck = "message_revoke_ack"
 )
 
 type IncomingMessage struct {
@@ -49,4 +55,12 @@ type OfflineSyncConversation struct {
 	LastMessage    string                    `json:"last_message"`
 	UpdateTime     time.Time                 `json:"update_time"`
 	Messages       []message.MessageResponse `json:"messages"`
+}
+
+type MessageReadData struct {
+	ConversationID uint64 `json:"conversation_id"`
+}
+
+type MessageRevokeData struct {
+	MessageID uint64 `json:"message_id"`
 }
